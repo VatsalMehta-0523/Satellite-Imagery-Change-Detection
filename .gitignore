@@ -1,0 +1,37 @@
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
+venv/
+.env
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+frontend/build/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Data / images (too large for git)
+backend/data/
+**/local_db.sqlite3
+
+# Model weights (distribute separately)
+backend/changeformer/checkpoints/*.pt
+backend/changeformer/venv/
+
+# Credentials (CRITICAL: DO NOT REMOVE)
+backend/gee_service_acconut.json
+backend/*.json
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*

@@ -1,0 +1,132 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Roboto+Mono:wght@400;500&display=swap');
+
+:root {
+  /* Core palette — Premium Interstellar Dark */
+  --bg-deep:        #04060b;
+  --bg-base:        #080c14;
+  --bg-elevated:    #0d1420;
+  --bg-card:        rgba(22, 31, 46, 0.7);
+  --bg-glass:       rgba(13, 20, 32, 0.65);
+  --bg-hover:       rgba(28, 40, 64, 0.8);
+  --border:         rgba(30, 45, 69, 0.6);
+  --border-bright:  rgba(66, 110, 180, 0.4);
+
+  /* Accent — Electric Cyan + Solar Amber */
+  --accent:         #00d4ff;
+  --accent-rgb:     0, 212, 255;
+  --accent-dim:     #00a8cc;
+  --accent-glow:    rgba(0, 212, 255, 0.12);
+  --accent2:        #f5a623;
+  --accent2-rgb:    245, 166, 35;
+  --accent2-dim:    #d48a10;
+  --success:        #00ffa3;
+  --warning:        #ffb800;
+  --danger:         #ff2d55;
+  --danger-glow:    rgba(255, 45, 85, 0.15);
+
+  /* Text */
+  --text-primary:   #f0f4f8;
+  --text-secondary: #94a9c9;
+  --text-muted:     #5e7696;
+  --text-dim:       #3a4d6b;
+
+  /* Sizing */
+  --sidebar-w-closed: 72px;
+  --sidebar-w-open:   280px;
+  --radius-sm:      8px;
+  --radius-md:      12px;
+  --radius-lg:      20px;
+
+  /* Typography */
+  --font-display:   'Outfit', sans-serif;
+  --font-mono:      'Roboto Mono', monospace;
+  --font-body:      'Outfit', sans-serif;
+
+  /* Effects */
+  --transition:      0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --shadow-lg:       0 20px 50px rgba(0, 0, 0, 0.7);
+  --glass-border:    1px solid rgba(255, 255, 255, 0.08);
+  --glow-accent:     0 0 30px rgba(0, 212, 255, 0.25);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--bg-deep);
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+}
+
+/* Glassmorphism Classes */
+.glass {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: var(--glass-border);
+}
+
+.glass-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: var(--glass-border);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Animations */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideInRight { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+@keyframes pulse-glow { 0%, 100% { opacity: 0.4; transform: scale(0.98); } 50% { opacity: 1; transform: scale(1); } }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.1), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite linear;
+}
+
+.animate-spin { animation: spin 1s linear infinite; }
+.animate-pulse { animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+.animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+.animate-slide-up { animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-slide-in-right { animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+/* Custom Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--bg-deep); }
+::-webkit-scrollbar-thumb { 
+  background: var(--border-bright); 
+  border-radius: 10px;
+  transition: var(--transition);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+
+/* Leaflet Overrides */
+.leaflet-container {
+  background: var(--bg-deep) !important;
+  font-family: var(--font-body) !important;
+}
+.leaflet-bar a {
+  background-color: var(--bg-elevated) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border) !important;
+  transition: var(--transition);
+}
+.leaflet-bar a:hover { background-color: var(--bg-hover) !important; color: var(--accent) !important; }
+.leaflet-draw-toolbar a { background-size: 20px 20px !important; }
+.leaflet-control-attribution { opacity: 0.3; font-size: 9px !important; }

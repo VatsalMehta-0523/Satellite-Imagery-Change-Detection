@@ -1,0 +1,36 @@
+import axios from 'axios';
+
+const api = axios.create({ baseURL: '/api' });
+
+export const fetchAPI = {
+  getContext: (data) => api.post('/fetch/context', data),
+  startFetch: (data) => api.post('/fetch/start', data),
+  getStatus: (projectId) => api.get(`/fetch/status/${projectId}`),
+  getProject: (projectId) => api.get(`/fetch/project/${projectId}`),
+  listProjects: () => api.get('/fetch/projects'),
+  getCDResult: (projectId) => api.get(`/change-detection/result/${projectId}`),
+  detectChanges: (projectId) => api.post(`/fetch/detect-changes/${projectId}`),
+};
+
+export const changeDetectionAPI = {
+  run: (projectId) => api.post('/change-detection/run', { project_id: projectId }),
+  getResult: (projectId) => api.get(`/change-detection/result/${projectId}`),
+};
+
+export const indicesAPI = {
+  get: (projectId) => api.get(`/indices/${projectId}`),
+};
+
+export const complianceAPI = {
+  list: (projectId) => api.get(`/compliance/${projectId}`),
+  listAll: () => api.get('/compliance/all'),
+  add: (data) => api.post('/compliance/', data),
+  update: (id, data) => api.put(`/compliance/${id}`, data),
+  delete: (id) => api.delete(`/compliance/${id}`),
+};
+
+export const insightsAPI = {
+  generate: (data) => api.post('/insights/generate', data),
+};
+
+export default api;

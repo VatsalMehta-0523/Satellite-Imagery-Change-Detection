@@ -1,0 +1,26 @@
+# ---- CUDA-enabled PyTorch source ----
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# ---- Core Deep Learning ----
+torch
+torchvision
+
+# ---- Core dependencies ----
+numpy
+scipy
+pillow
+opencv-python
+matplotlib
+tqdm
+einops
+
+# ---- Model dependency ----
+timm
+tifffile
+
+# ---- Optional but useful ----
+pandas
+scikit-image
+
+# ---- Compatibility ----
+typing_extensions
