@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { fetchAPI } from '../../utils/api';
+import { fetchAPI, insightsAPI, getImageUrl } from '../../utils/api';
 
 export default function ChangeDetectionPage({ projectId, addNotification, jobStatus }) {
   const [result, setResult] = useState(null);
@@ -13,6 +13,26 @@ export default function ChangeDetectionPage({ projectId, addNotification, jobSta
   const isSyncing = jobStatus?.change_detection === 'syncing';
   const isPending = (jobStatus?.change_detection === 'pending' || !jobStatus?.change_detection) && !isReady && !isSyncing;
   const isError = jobStatus?.change_detection === 'error';
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportPDF = async () => {
+    if (!projectId) return;
+    setIsExporting(true);
+    try {
+      const response = await insightsAPI.downloadReport(projectId);
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `UrbanEye_Mission_${projectId}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      addNotification('Intelligence Report ready for download', 'success');
+    } catch (e) {
+      addNotification('Failed to generate PDF report', 'error');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const handleDetectChanges = async () => {
     try {
@@ -33,6 +53,10 @@ export default function ChangeDetectionPage({ projectId, addNotification, jobSta
       setResult({
         mask_url: jobStatus.results.cd?.mask_url || jobStatus.results.cd_url,
         confidence: Number(jobStatus.results.cd?.confidence || jobStatus.results.confidence || 0),
+        change_percentage: jobStatus.results.cd?.change_percentage || jobStatus.results.change_percentage,
+        area_m2: jobStatus.results.cd?.area_m2 || jobStatus.results.area_m2,
+        area_km2: jobStatus.results.cd?.area_km2 || jobStatus.results.area_km2,
+        area_hectares: jobStatus.results.cd?.area_hectares || jobStatus.results.area_hectares,
         t1_url: jobStatus.t1_tci_url,
         t2_url: jobStatus.t2_tci_url,
         t1_date: jobStatus.results.cd?.t1_date || jobStatus.t1_date || 'Baseline',
@@ -58,17 +82,21 @@ export default function ChangeDetectionPage({ projectId, addNotification, jobSta
             const t1 = r.data.images.find(im => im.id === cd.t1_image_id);
             const t2 = r.data.images.find(im => im.id === cd.t2_image_id);
             setResult({
-                mask_url: `/data/${cd.mask_path.split('data\\')[1].replace(/\\/g, '/')}`,
+                mask_url: getImageUrl(`/data/${cd.mask_path.split('data\\')[1].replace(/\\/g, '/')}`),
                 confidence: cd.confidence,
-                t1_url: `/data/${t1.tci_png_path.split('data\\')[1].replace(/\\/g, '/')}`,
-                t2_url: `/data/${t2.tci_png_path.split('data\\')[1].replace(/\\/g, '/')}`,
+                change_percentage: cd.change_percentage,
+                area_m2: cd.area_m2,
+                area_km2: cd.area_km2,
+                area_hectares: cd.area_hectares,
+                t1_url: getImageUrl(`/data/${t1.tci_png_path.split('data\\')[1].replace(/\\/g, '/')}`),
+                t2_url: getImageUrl(`/data/${t2.tci_png_path.split('data\\')[1].replace(/\\/g, '/')}`),
                 t1_date: t1.date,
                 t2_date: t2.date
             });
         }
       }).catch(() => {});
     }
-  }, [projectId, isReady, jobStatus, result, isPending]);
+  }, [projectId, isReady, jobStatus, isPending]);
 
   if (!projectId) return <div style={centerStyle}><EmptyTelemetryState hasProject={false} /></div>;
   if (isSyncing) return <div style={centerStyle}><InferenceLoader logs={jobStatus?.logs} /></div>;
@@ -100,6 +128,26 @@ export default function ChangeDetectionPage({ projectId, addNotification, jobSta
               <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', letterSpacing: 1 }}>MODEL INFERENCE ACTIVE...</span>
             </div>
           )}
+          {result && !isSyncing && (
+            <button 
+                onClick={handleExportPDF}
+                disabled={isExporting}
+                className="btn-accent"
+                style={{ 
+                    padding: '8px 20px', 
+                    fontSize: 10, 
+                    fontWeight: 900, 
+                    borderRadius: 30, 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: 8,
+                    opacity: isExporting ? 0.6 : 1
+                }}
+            >
+                {isExporting ? 'GENERATING DOSSIER...' : 'EXPORT INTELLIGENCE REPORT (PDF)'}
+                <span>⬇</span>
+            </button>
+          )}
         </div>
 
         {isPending && !result?.t1_url && <EmptyTelemetryState hasProject={!!projectId} />}
@@ -123,9 +171,28 @@ export default function ChangeDetectionPage({ projectId, addNotification, jobSta
             
             {/* Metrics Dashboard */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
-              <DataTile label="CHANGE MAGNITUDE" value={`${(result.confidence * 100).toFixed(1)}%`} sub="Pixel Difference Ratio" color="var(--accent)" />
-              <DataTile label="CLASSIFICATION" value={activeExp.change_type?.toUpperCase() || 'CALCULATING...'} sub={activeExp.severity ? `Risk Level: ${activeExp.severity}` : 'Model Processing'} color={severityColor} />
-              <DataTile label="OBSERVATION SPAN" value={result.t1_date} sub={`to ${result.t2_date}`} color="#a855f7" />
+              <DataTile 
+                label="GEOSPATIAL CHANGE" 
+                value={`${(result.change_percentage || result.confidence * 100 || 0).toFixed(2)}%`} 
+                sub="Total Area Disturbance" 
+                color="var(--accent)" 
+              />
+              <DataTile 
+                label="SPATIAL FOOTPRINT" 
+                value={`${(result.area_hectares || 0).toFixed(2)} Ha`} 
+                sub={
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+                    {Number(result.area_km2 || 0).toFixed(4)} km² | {Number(result.area_m2 || 0).toLocaleString()} m²
+                  </div>
+                } 
+                color="#38bdf8" 
+              />
+              <DataTile 
+                label="OBSERVATION SPAN" 
+                value={result.t1_date} 
+                sub={`to ${result.t2_date}`} 
+                color="#a855f7" 
+              />
             </div>
 
             {/* Tri-Panel Preview */}

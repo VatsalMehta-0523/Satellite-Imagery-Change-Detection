@@ -1,5 +1,16 @@
 import axios from 'axios';
 
+export const API_BASE_URL = window.location.hostname === 'localhost' ? 'http://localhost:8000' : '';
+export const SOCKET_URL = API_BASE_URL ? API_BASE_URL.replace('http', 'ws') : `ws://${window.location.host}`;
+
+export const getImageUrl = (path) => {
+  if (!path) return null;
+  if (path.startsWith('http')) return path;
+  // Handle absolute or relative paths from backend
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${API_BASE_URL}${cleanPath}`;
+};
+
 const api = axios.create({ baseURL: '/api' });
 
 export const fetchAPI = {
@@ -31,6 +42,7 @@ export const complianceAPI = {
 
 export const insightsAPI = {
   generate: (data) => api.post('/insights/generate', data),
+  downloadReport: (projectId) => api.get(`/reports/mission/${projectId}`, { responseType: 'blob' }),
 };
 
 export default api;

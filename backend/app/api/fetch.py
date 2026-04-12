@@ -21,11 +21,10 @@ from app.services.llm import generate_prefetch_context, generate_change_explanat
 from app.core.config import DATA_DIR
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
-# Structured metadata for frontend status tracking
-# States: 'pending', 'syncing', 'ready', 'error'
-_fetch_status: dict = {}
+# Global state tracker for mission telemetry
+_fetch_status = {}
 
 class FetchRequest(BaseModel):
     aoi_geojson: dict
@@ -34,50 +33,54 @@ class FetchRequest(BaseModel):
     source: str = "s2dr3"
 
 def aoi_to_string(aoi_geojson: dict) -> str:
-    """Safely convert various GeoJSON formats to S2DR3 bbox string."""
-    try:
-        # Handle Feature vs Geometry vs Coordinates
-        geometry = aoi_geojson.get("geometry", aoi_geojson)
-        coords = geometry.get("coordinates", [])
-        
-        # If deeply nested, get the first ring
-        if coords and isinstance(coords[0], list) and isinstance(coords[0][0], list):
-            coords = coords[0]
-            
-        if not coords or len(coords) < 3:
-            return "72.4550 23.0000 72.4850 23.0200" # Fallback to user's sample AOI
-
-        lons = [float(c[0]) for c in coords]
-        lats = [float(c[1]) for c in coords]
-        return f"{min(lons):.4f} {min(lats):.4f} {max(lons):.4f} {max(lats):.4f}"
-    except Exception as e:
-        print(f">>> AOI Conversion Error: {e}")
-        return "72.4550 23.0000 72.4850 23.0200"
+    """Converts AOI geojson/geometry to 'lon_min lat_min lon_max lat_max' string."""
+    geom = aoi_geojson.get("geometry", aoi_geojson)
+    coords = geom.get("coordinates", [])
+    if not coords or not coords[0]:
+        return "0 0 0 0"
+    
+    # Simple bounding box extraction from polygon/multipolygon
+    lons = []
+    lats = []
+    
+    def extract_coords(c_list):
+        for item in c_list:
+            if isinstance(item[0], (int, float)):
+                lons.append(item[0])
+                lats.append(item[1])
+            else:
+                extract_coords(item)
+                
+    extract_coords(coords)
+    if not lons: return "0 0 0 0"
+    return f"{min(lons)} {min(lats)} {max(lons)} {max(lats)}"
 
 @router.post("/context")
 async def get_prefetch_context(request: FetchRequest):
-    aoi = request.aoi_geojson.get("geometry", request.aoi_geojson)
-    context = await generate_prefetch_context(aoi, request.t1_date, request.t2_date)
-    return {"context": context}
+    """Provides AI-generated insight while mission images are loading."""
+    try:
+        context = await generate_prefetch_context(request.aoi_geojson, request.t1_date, request.t2_date)
+        return {"id": "premission_ctx", "content": context}
+    except Exception as e:
+        return {"id": "premission_ctx", "content": "Initializing orbital links and analyzing geospatial context..."}
 
 @router.post("/start")
 async def start_fetch(request: FetchRequest):
     """
     Start the fetch pipeline - returns a project_id immediately.
-    Frontend polls /status/{project_id} for progress.
     """
+    logger.info(f">>> [FETCH] INITIATING MISSION START REQUEST - Source: {request.source}")
     pool = await get_pool()
-    aoi = request.aoi_geojson.get("geometry", request.aoi_geojson)
-    
     try:
         async with pool.acquire() as conn:
             project = await conn.fetchrow(
                 "INSERT INTO projects (aoi_geojson) VALUES ($1) RETURNING id",
-                json.dumps(aoi),
+                json.dumps(request.aoi_geojson.get("geometry", request.aoi_geojson)),
             )
             project_id = project["id"]
         
-        # IMMEDIATELY initialize status so polling doesn't return 404
+        logger.info(f">>> [FETCH] MISSION {project_id} DB RECORD CREATED. Launching background task.")
+        
         _fetch_status[project_id] = {
             "source": request.source,
             "stage": "tci_sync",
@@ -91,66 +94,62 @@ async def start_fetch(request: FetchRequest):
             "results": {}
         }
         
-        logger.info(f"MISSION {project_id} INITIATED - AOI Ready.")
-
-        # Launch full mission sequence in background
         asyncio.create_task(
-            _run_full_mission_sequence(project_id, aoi, request.t1_date, request.t2_date, request.source)
+            _run_full_mission_sequence(project_id, request.aoi_geojson.get("geometry", request.aoi_geojson), request.t1_date, request.t2_date, request.source)
         )
 
         return {"project_id": project_id, "status": "mission_initiated"}
     except Exception as e:
-        logger.error(f"Failed to start mission: {e}")
+        logger.error(f">>> [FETCH] CRITICAL STARTUP ERROR: {str(e)}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 async def _run_full_mission_sequence(project_id: int, aoi: dict, t1_date: str, t2_date: str, source: str):
-    """
-    Orchestrates the phased logic with global error handling.
-    """
+    logger.info(f">>> [MISSION {project_id}] SEQUENCE COMMENCED.")
     try:
-        aoi_str = aoi_to_string(aoi)
-        aoi_json = aoi
-        
         # --- STAGE 1: TCI SYNCHRONIZATION ---
         async def fetch_tci(date, label):
-            logger.info(f"[MISSION {project_id}] {label} Orbit Sync Started.")
-            def update_p(pct):
-                if project_id in _fetch_status:
-                    _fetch_status[project_id]["progress"][label.lower()] = pct
-
+            logger.info(f">>> [MISSION {project_id}] {label} SYNC START ({date})")
             try:
-                if source == "planet":
-                    res = await execute_planet_tci_phase(date, aoi_str, label, project_id, update_p)
-                elif source == "gee":
-                    res = await execute_gee_tci_phase(date, aoi_str, label, project_id, update_p)
-                else:
-                    # Default/S2DR3 selection: Use Gamma for 2.5m RGB enhancement
-                    res = await execute_tci_phase(date, aoi_str, label, project_id, source="gamma", on_progress=update_p)
-                    
-                if res:
-                    print(f">>> [MISSION {project_id}] {label} TCI SUCCESS: {res['png_tci']}")
-                    rel = os.path.relpath(res["png_tci"], DATA_DIR)
+                def update_p(pct):
                     if project_id in _fetch_status:
-                        _fetch_status[project_id][f"{label.lower()}_tci_url"] = f"/data/{rel.replace(os.sep, '/')}"
-                        _fetch_status[project_id][label.lower()] = "ready"
+                        _fetch_status[project_id]["progress"][label.lower()] = pct
+
+                if source == "planet":
+                    res = await execute_planet_tci_phase(date, aoi_to_string(aoi), label, project_id, update_p)
+                elif source == "gee":
+                    res = await execute_gee_tci_phase(date, aoi_to_string(aoi), label, project_id, update_p)
+                else:
+                    res = await execute_tci_phase(date, aoi_to_string(aoi), label, project_id, source="gamma", on_progress=update_p)
+                
+                if res and "error" not in res:
+                    logger.info(f">>> [MISSION {project_id}] {label} TCI READY: {res['png_tci']}")
+                    # Update status for UI
+                    if project_id in _fetch_status:
+                        rel = os.path.relpath(res['png_tci'], DATA_DIR)
+                        status_key = label.lower()
+                        _fetch_status[project_id][f"{status_key}_tci_url"] = f"/data/{rel.replace(os.sep, '/')}"
+                        _fetch_status[project_id][status_key] = "ready"
                     return res
                 else:
-                    logger.error(f"[MISSION {project_id}] {label} TCI Fetch returned None.")
+                    logger.error(f">>> [MISSION {project_id}] {label} TCI FAILED or License Restricted.")
+                    return None
             except Exception as e:
-                logger.error(f"[MISSION {project_id}] {label} TCI Sync Exception: {e}")
-            
-            if project_id in _fetch_status:
-                _fetch_status[project_id][label.lower()] = "error"
-            return None
+                logger.error(f">>> [MISSION {project_id}] {label} TCI SYNC EXCEPTION: {str(e)}")
+                return None
 
         t1_tci, t2_tci = await asyncio.gather(
             fetch_tci(t1_date, "T1"), 
             fetch_tci(t2_date, "T2")
         )
         
-        if not t1_tci or not t2_tci:
-            logger.error(f"[MISSION {project_id}] Stage 1 Critical Failure. Aborting.")
+        if not t1_tci and not t2_tci:
+            logger.error(f"[MISSION {project_id}] Both orbits failed. Stage 1 Critical Failure. Aborting.")
             return
+
+        if not t1_tci or not t2_tci:
+            logger.warning(f"[MISSION {project_id}] One orbit failed. Proceeding in DEGRADED MODE.")
+            if project_id in _fetch_status:
+                _fetch_status[project_id]["logs"].append("WARNING: Mission continuing in degraded mode. One orbital pass was unsuccessful.")
 
         _fetch_status[project_id]["stage"] = "intel_acquisition"
 
@@ -160,22 +159,25 @@ async def _run_full_mission_sequence(project_id: int, aoi: dict, t1_date: str, t
         t2_dt = datetime.strptime(t2_date, '%Y-%m-%d').date()
         
         async with pool.acquire() as conn:
-            img1 = await conn.fetchrow("INSERT INTO images (project_id, type, source, date, tci_png_path) VALUES ($1,$2,$3,$4,$5) RETURNING id",
-                                      project_id, "t1", source, t1_dt, t1_tci["png_tci"])
-            img2 = await conn.fetchrow("INSERT INTO images (project_id, type, source, date, tci_png_path) VALUES ($1,$2,$3,$4,$5) RETURNING id",
-                                      project_id, "t2", source, t2_dt, t2_tci["png_tci"])
+            if t1_tci:
+                img1 = await conn.fetchrow("INSERT INTO images (project_id, type, source, date, tci_png_path) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+                                          project_id, "t1", source, t1_dt, t1_tci["png_tci"])
+                _fetch_status[project_id]["results"]["t1_db_id"] = img1["id"]
             
-            _fetch_status[project_id]["results"]["t1_db_id"] = img1["id"]
-            _fetch_status[project_id]["results"]["t2_db_id"] = img2["id"]
+            if t2_tci:
+                img2 = await conn.fetchrow("INSERT INTO images (project_id, type, source, date, tci_png_path) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+                                          project_id, "t2", source, t2_dt, t2_tci["png_tci"])
+                _fetch_status[project_id]["results"]["t2_db_id"] = img2["id"]
+            
             _fetch_status[project_id]["t1_date"] = t1_date
             _fetch_status[project_id]["t2_date"] = t2_date
 
         _fetch_status[project_id]["stage"] = "intel_acquisition"
-        print(f">>> [MISSION {project_id}] STAGE 1 COMPLETE. STARTING INTELLIGENCE...")
+        logger.info(f">>> [MISSION {project_id}] STAGE 1 COMPLETE. STARTING INTELLIGENCE...")
 
         async def run_indices():
             try:
-                print(f">>> [MISSION {project_id}] EXTRACTING SPECTRAL INDICES...")
+                logger.info(f">>> [MISSION {project_id}] EXTRACTING SPECTRAL INDICES...")
                 if project_id in _fetch_status:
                     _fetch_status[project_id]["spectral_intel"] = "syncing"
                 
@@ -219,10 +221,10 @@ async def _run_full_mission_sequence(project_id: int, aoi: dict, t1_date: str, t
                     _fetch_status[project_id]["results"]["indices"] = {"t1": t1_indices, "t2": t2_indices}
                     _fetch_status[project_id]["spectral_intel"] = "ready"
                 
-                print(f">>> [MISSION {project_id}] SPECTRAL INTEL READY.")
+                logger.info(f">>> [MISSION {project_id}] SPECTRAL INTEL READY.")
                 return {"t1": t1_ms, "t2": t2_ms}
             except Exception as e:
-                print(f">>> [MISSION {project_id}] INDICES ERROR: {e}")
+                logger.error(f">>> [MISSION {project_id}] INDICES ERROR: {e}")
                 if project_id in _fetch_status:
                     _fetch_status[project_id]["spectral_intel"] = "error"
                 return {"t1": None, "t2": None}
@@ -231,7 +233,7 @@ async def _run_full_mission_sequence(project_id: int, aoi: dict, t1_date: str, t
 
         # MISSION STAGE 1 & 2 COMPLETE
         _fetch_status[project_id]["stage"] = "complete"
-        print(f">>> [MISSION {project_id}] BASELINE TELEMETRY READY.")
+        logger.info(f">>> [MISSION {project_id}] BASELINE TELEMETRY READY.")
 
     except Exception as e:
         logger.critical(f"[MISSION {project_id}] CRITICAL PIPELINE FAILURE: {e}")
@@ -290,7 +292,7 @@ async def _run_manual_cd_workflow(project_id, t1_db, t2_db, t1_path, t2_path, lo
         pool = await get_pool()
         async with pool.acquire() as conn:
             cd_db = await conn.fetchrow("INSERT INTO change_detection (project_id, t1_image_id, t2_image_id, mask_path, confidence) VALUES ($1,$2,$3,$4,$5) RETURNING id",
-                                       project_id, t1_db["id"], t2_db["id"], cd_res["mask_path"], cd_res["confidence"])
+                                       project_id, t1_db["id"], t2_db["id"], cd_res["mask_path"], float(cd_res["stats"].get("change_percentage", 0)) / 100.0)
         
         # Synthesis
         log_fn("Generating AI Narratives and Insights...")
@@ -304,14 +306,19 @@ async def _run_manual_cd_workflow(project_id, t1_db, t2_db, t1_path, t2_path, lo
             t1_indices = {r["index_type"]: {"mean": r["mean_value"]} for r in t1_indices_rows}
             t2_indices = {r["index_type"]: {"mean": r["mean_value"]} for r in t2_indices_rows}
 
-        explanation = await generate_change_explanation(cd_res["confidence"], t1_date, t2_date, t1_indices, t2_indices)
+        confidence_val = float(cd_res["stats"].get("change_percentage", 0)) / 100.0
+        explanation = await generate_change_explanation(confidence_val, t1_date, t2_date, t1_indices, t2_indices)
+        
+        # Ensure cd_res has confidence for report generation
+        cd_res["confidence"] = confidence_val
         report = await generate_insights_report({}, t1_date, t2_date, t1_indices, t2_indices, cd_res, [])
 
         # Update status
         rel_mask = os.path.relpath(cd_res["mask_path"], DATA_DIR) if cd_res["mask_path"] else None
+        
         _fetch_status[project_id]["results"]["cd"] = {
             "mask_url": f"/data/{rel_mask.replace(os.sep, '/')}" if rel_mask else None,
-            "confidence": float(cd_res["confidence"]),
+            "confidence": confidence_val,
             "t1_date": t1_date, 
             "t2_date": t2_date
         }

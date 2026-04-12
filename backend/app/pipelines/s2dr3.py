@@ -8,15 +8,15 @@ import httpx
 import numpy as np
 import rasterio
 import matplotlib.pyplot as plt
-import logging
 from PIL import Image
 from typing import Optional, Dict, Any
 
 from app.core.config import S2DR3_BASE_URL, S2DR3_USER_ID, DATA_DIR
 from app.utils.subprocess import safe_run_subprocess
 from app.services.legend import INDEX_LEGEND
+from app.core.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("app.pipelines.s2dr3")
 
 # Global lock to prevent gcloud collisions
 GCLOUD_LOCK = asyncio.Lock()
@@ -88,7 +88,7 @@ def generate_indices(ms_path: str, output_dir: str, label: str) -> Dict[str, Any
 
 async def submit_and_poll(client: httpx.AsyncClient, date: str, aoi: str, label: str, source: str = "s2dr3") -> Optional[dict]:
     """Submit job and poll until complete with safety limits."""
-    print(f">>> [I/O] [{source.upper()}] {label} Submitting Job: {date}...")
+    logger.info(f">>> [I/O] [{source.upper()}] {label} Submitting Job: {date}...")
     try:
         resp = await client.post(
             f"{S2DR3_BASE_URL}/{S2DR3_USER_ID}",
@@ -96,16 +96,16 @@ async def submit_and_poll(client: httpx.AsyncClient, date: str, aoi: str, label:
             timeout=30.0,
         )
         if resp.status_code != 200:
-            print(f">>> [I/O] [{source.upper()}] {label} Submission Failed: {resp.status_code}")
+            logger.error(f">>> [I/O] [{source.upper()}] {label} Submission Failed: {resp.status_code}")
             return None
 
         data = resp.json()
         job_id = data.get("job_id")
         if not job_id: 
-            print(f">>> [I/O] {label} Missing Job ID.")
+            logger.error(f">>> [I/O] {label} Missing Job ID.")
             return None
 
-        print(f">>> [I/O] {label} Job {job_id} Active. Polling...")
+        logger.info(f">>> [I/O] {label} Job {job_id} Active. Polling...")
         check_url = f"{S2DR3_BASE_URL}/{S2DR3_USER_ID}/{job_id}"
 
         # Safety: Max 50 polls (approx 3 mins)
@@ -114,20 +114,20 @@ async def submit_and_poll(client: httpx.AsyncClient, date: str, aoi: str, label:
                 r = await client.get(check_url, timeout=10.0)
                 text = r.text.lower()
                 if "completed" in text:
-                    print(f">>> [I/O] {label} Remote Work Done.")
+                    logger.info(f">>> [I/O] {label} Remote Work Done.")
                     return {"tci": data.get("save_path_TCI"), "ms": data.get("save_path_MS"), "label": label, "date": date}
                 elif "failed" in text or "error" in text:
-                    print(f">>> [I/O] {label} Remote Error: {r.text}")
+                    logger.error(f">>> [I/O] {label} Remote Error: {r.text}")
                     return None
             except Exception as e:
-                print(f">>> [I/O] {label} Poll Attempt {attempt} Error: {e}")
+                logger.error(f">>> [I/O] {label} Poll Attempt {attempt} Error: {e}")
             
             await asyncio.sleep(4)
         
-        print(f">>> [I/O] {label} Polling Timeout.")
+        logger.error(f">>> [I/O] {label} Polling Timeout.")
         return None
     except Exception as e:
-        print(f">>> [I/O] {label} Submission Error: {e}")
+        logger.error(f">>> [I/O] {label} Submission Error: {e}")
         return None
 
 async def download_one(remote: str, local: str, on_progress=None) -> bool:

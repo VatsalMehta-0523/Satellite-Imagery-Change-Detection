@@ -43,6 +43,11 @@ CREATE TABLE IF NOT EXISTS change_detection (
     t2_image_id  INTEGER REFERENCES images(id),
     mask_path    TEXT,
     confidence   DOUBLE PRECISION,
+    change_percentage DOUBLE PRECISION,
+    area_m2      DOUBLE PRECISION,
+    area_km2      DOUBLE PRECISION,
+    area_hectares DOUBLE PRECISION,
+    ai_summary   JSONB,
     created_at   TIMESTAMPTZ DEFAULT NOW()
 );
 

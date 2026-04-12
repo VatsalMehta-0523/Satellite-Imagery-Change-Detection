@@ -116,8 +116,19 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
 
+/* Layout Wrappers */
+.main-content {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
 /* Leaflet Overrides */
 .leaflet-container {
+  height: 100% !important;
+  width: 100% !important;
   background: var(--bg-deep) !important;
   font-family: var(--font-body) !important;
 }

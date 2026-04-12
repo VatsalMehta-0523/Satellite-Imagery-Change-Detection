@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { id: 'indices',    icon: '▥', label: 'Index Intel',     sub: 'Spectral Validation' },
   { id: 'compliance', icon: '▣', label: 'Compliance',      sub: 'Regulation Engine' },
   { id: 'insights',   icon: '✴', label: 'Insights AI',      sub: 'Project Reports' },
+  { id: 'agent',      icon: '🧠', label: 'ORION Agent',      sub: 'Mission Control' },
 ];
 
 export default function Sidebar({ open, onOpen, onClose, activePage, onNavigate, jobActive }) {

@@ -27,7 +27,7 @@ async def _safe_generate(prompt: str, expect_json: bool = False) -> str:
         response = await asyncio.to_thread(
             client.chat.completions.create,
             messages=[{"role": "user", "content": prompt}],
-            model="openai/gpt-oss-120b",
+            model="llama-3.3-70b-versatile",
             temperature=0.4,
             max_tokens=2048,
             top_p=1,

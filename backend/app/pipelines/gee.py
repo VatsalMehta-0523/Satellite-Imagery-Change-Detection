@@ -4,15 +4,15 @@ import httpx
 import requests
 import numpy as np
 import rasterio
-import logging
 from PIL import Image
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
 from app.core.config import GEE_JSON_PATH, DATA_DIR
+from app.core.logger import get_logger
 from app.pipelines.s2dr3 import generate_indices
 
-logger = logging.getLogger(__name__)
+logger = get_logger("app.pipelines.gee")
 
 # Initialize GEE using Service Account
 try:

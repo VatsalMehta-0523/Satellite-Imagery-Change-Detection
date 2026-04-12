@@ -9,13 +9,15 @@ import numpy as np
 import rasterio
 import logging
 from PIL import Image
+import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
 from app.core.config import DATA_DIR, PL_API_KEY
+from app.core.logger import get_logger
 from app.utils.subprocess import safe_run_subprocess
 
-logger = logging.getLogger(__name__)
+logger = get_logger("app.pipelines.planet")
 
 # Constants
 PLANET_DATA_URL = "https://api.planet.com/data/v1"
@@ -77,7 +79,8 @@ async def execute_planet_tci_phase(
                     {"type": "DateRangeFilter", "field_name": "acquired", "config": {"gte": gte, "lte": lte}},
                     {"type": "GeometryFilter", "field_name": "geometry", "config": _bbox_to_polygon(aoi_bbox)},
                     {"type": "RangeFilter", "field_name": "cloud_cover", "config": {"gte": 0, "lte": 0.20}},
-                    {"type": "AssetFilter", "config": ["ortho_analytic_8b_sr"]},
+                    {"type": "PermissionFilter", "config": ["assets:download"]},
+                    # Removed restrictive AssetFilter to allow fallback discovery
                 ],
             },
         }
@@ -89,23 +92,45 @@ async def execute_planet_tci_phase(
         
         features = resp.json().get("features", [])
         if not features: 
-            logger.error(f"No Planet imagery found for {date_str}")
+            logger.error(f"No Planet imagery found for {date_str} (AOI: {aoi_bbox})")
             return None
         
-        best = sorted(features, key=lambda f: f["properties"].get("cloud_cover", 1))[0]
+        # Sort by cloud cover and proximity to requested date
+        best = sorted(features, key=lambda f: (f["properties"].get("cloud_cover", 1), abs((datetime.strptime(f["properties"]["acquired"][:10], "%Y-%m-%d") - dt).days)))[0]
         item_id = best["id"]
+        logger.info(f"Selected Planet Item: {item_id}")
         
-        # 2. Activation
+        # 2. Dynamic Asset Discovery
         if on_progress: on_progress(25)
         assets_url = f"{PLANET_DATA_URL}/item-types/{ITEM_TYPE}/items/{item_id}/assets"
         assets_resp = await client.get(assets_url)
         assets = assets_resp.json()
-        asset = assets.get("ortho_analytic_8b_sr")
         
-        if not asset:
-            logger.error(f"Asset ortho_analytic_8b_sr not found for item {item_id}")
-            return None
+        # Determine best available SR asset and corresponding bundle
+        active_bundle = BUNDLE
+        active_asset_name = "ortho_analytic_8b_sr"
+        
+        if "ortho_analytic_8b_sr" in assets:
+            logger.info("SuperDove 8-band SR detected.")
+            active_asset_name = "ortho_analytic_8b_sr"
+            active_bundle = "analytic_8b_sr_udm2"
+        elif "ortho_analytic_4b_sr" in assets:
+            logger.info("Dove 4-band SR detected (Fallback).")
+            active_asset_name = "ortho_analytic_4b_sr"
+            active_bundle = "analytic_sr_udm2"
+        elif "ortho_analytic_4b" in assets:
+            logger.info("Dove 4-band Basic detected (Legacy Fallback).")
+            active_asset_name = "ortho_analytic_4b"
+            active_bundle = "analytic_udm2"
+        else:
+            perms = best.get('_permissions', [])
+            logger.error(f"LICENSE RESTRICTED: No suitable SR assets found for item {item_id}. Available: {list(assets.keys())}")
+            logger.error(f"Your Planet account ({best.get('properties', {}).get('item_type', 'N/A')}) lacks download permissions for this item.")
+            logger.debug(f"Missing permissions for: {item_id}. Current perms: {perms}")
+            return {"error": "LICENSE_RESTRICTED", "item_id": item_id}
 
+        asset = assets.get(active_asset_name)
+        
         if asset.get("status") != "active":
             activate_link = asset.get("_links", {}).get("activate")
             if not activate_link:
@@ -116,20 +141,18 @@ async def execute_planet_tci_phase(
             for _ in range(40): # 10 mins approx
                 await asyncio.sleep(15)
                 status = (await client.get(assets_url)).json()
-                if status.get("ortho_analytic_8b_sr", {}).get("status") == "active":
+                if status.get(active_asset_name, {}).get("status") == "active":
                     break
         
         # 3. Place Order (Clipped)
         if on_progress: on_progress(50)
-        minx, miny, maxx, maxy = map(float, aoi_bbox.split())
         order_body = {
             "name": f"urbaneye_{project_id}_{label}_{item_id[:8]}",
             "source_type": "scenes",
-            "products": [{"item_ids": [item_id], "item_type": ITEM_TYPE, "product_bundle": BUNDLE}],
+            "products": [{"item_ids": [item_id], "item_type": ITEM_TYPE, "product_bundle": active_bundle}],
             "tools": [{"clip": {"aoi": _bbox_to_polygon(aoi_bbox)}}]
         }
         
-        # Note: Orders API uses API key in header differently or same auth
         order_resp = await client.post(PLANET_ORDERS_URL, json=order_body)
         if order_resp.status_code not in (200, 202):
             logger.error(f"Planet Order failed: {order_resp.text}")
@@ -145,14 +168,17 @@ async def execute_planet_tci_phase(
             if ostatus.get("state") == "success":
                 break
             if ostatus.get("state") in ("failed", "cancelled"):
+                logger.error(f"Planet Order {order_id} failed with state: {ostatus.get('state')}")
                 return None
         
         # 5. Download
         if on_progress: on_progress(90)
         results = (await client.get(f"{PLANET_ORDERS_URL}/{order_id}")).json().get("_links", {}).get("results", [])
-        tif_url = next((r["location"] for r in results if r.get("name", "").endswith(".tif") and ("SR" in r["name"] or "analytic_8b" in r["name"])), None)
+        tif_url = next((r["location"] for r in results if r.get("name", "").endswith(".tif") and ("SR" in r["name"] or "analytic" in r["name"])), None)
         
-        if not tif_url: return None
+        if not tif_url: 
+            logger.error("Order success but no TIF found in result links.")
+            return None
         
         local_tif = os.path.join(label_dir, "planet_sr.tif")
         local_png = os.path.join(label_dir, "tci.png")
@@ -162,15 +188,28 @@ async def execute_planet_tci_phase(
                 async for chunk in r.aiter_bytes():
                     f.write(chunk)
                     
-        # 6. Extract TCI (Planet Red=B6, Green=B4, Blue=B2)
+        # 6. Extract TCI with Dynamic Band Mapping
         with rasterio.open(local_tif) as src:
-            data = src.read([6, 4, 2]).astype(np.float32) / 10000.0
-            # Quick boost for visualization
+            band_count = src.count
+            logger.info(f"Downloaded TIF has {band_count} bands.")
+            
+            # 8-band mapping: Red=B6, Green=B4, Blue=B2 (1-indexed: 6, 4, 2)
+            # 4-band mapping: Red=B3, Green=B2, Blue=B1 (1-indexed: 3, 2, 1)
+            rgb_indices = [6, 4, 2] if band_count >= 8 else [3, 2, 1]
+            
+            try:
+                data = src.read(rgb_indices).astype(np.float32) / 10000.0
+            except IndexError:
+                # Emergency fallback to first 3 bands if indices aren't available
+                logger.warning(f"Could not read indices {rgb_indices}. Falling back to first 3 bands.")
+                data = src.read([1, 2, 3]).astype(np.float32) / 10000.0
+
+            # Boost for visualization
             data = np.clip(data * 3.5 * 255.0, 0, 255).astype(np.uint8)
             Image.fromarray(np.transpose(data, (1, 2, 0))).save(local_png, "PNG")
         
         if on_progress: on_progress(100)
-        return {"png_tci": local_png, "tif_ms": local_tif, "label": label, "date": date_str}
+        return {"png_tci": local_png, "tif_ms": local_tif, "label": label, "date": date_str, "band_count": band_count}
 
 async def execute_planet_ms_phase(
     result: dict,
@@ -183,26 +222,36 @@ async def execute_planet_ms_phase(
     label_dir = os.path.join(project_dir, label.lower())
     
     with rasterio.open(local_tif) as src:
-        # Band mapping (0-indexed): 1=Blue, 3=GreenII (B4), 5=Red (B6), 6=RedEdge (B7), 7=NIR (B8)
+        band_count = result.get("band_count", src.count)
         data = src.read().astype(np.float32) / 10000.0
         
     eps = 1e-10
-    blue = data[1] # B2
-    grn  = data[3] # B4 (Green II)
-    red  = data[5] # B6
-    re   = data[6] # B7
-    nir  = data[7] # B8
+    # Map bands based on instrument generation
+    if band_count >= 8:
+        # SuperDove 8-band: B2=Blue, B4=Green II, B6=Red, B7=RedEdge, B8=NIR
+        blue = data[1] # B2
+        grn  = data[3] # B4
+        red  = data[5] # B6
+        re   = data[6] # B7
+        nir  = data[7] # B8
+    else:
+        # Dove Classic 4-band: B1=Blue, B2=Green, B3=Red, B4=NIR
+        blue = data[0] # B1
+        grn  = data[1] # B2
+        red  = data[2] # B3
+        nir  = data[3] # B4
+        re   = nir     # Fallback RedEdge to NIR for 4-band
     
     indices = {}
     
-    # 1. NDVI
+    # 1. NDVI (NIR - Red) / (NIR + Red)
     indices["NDVI"] = (nir - red) / (nir + red + eps)
-    # 2. EVI
+    # 2. EVI (2.5 * (NIR-Red) / (NIR + 6*Red - 7.5*Blue + 1))
     evi_d = nir + 6.0 * red - 7.5 * blue + 1.0
     indices["EVI"] = np.clip(2.5 * (nir - red) / (evi_d + eps), -1.5, 1.5)
-    # 3. NDWI
+    # 3. NDWI (Green - NIR) / (Green + NIR)
     indices["NDWI"] = (grn - nir) / (grn + nir + eps)
-    # 4. NDRE (Planet Special)
+    # 4. NDRE (NIR - RedEdge) / (NIR + RedEdge)
     indices["NDRE"] = (nir - re) / (nir + re + eps)
     
     generated = {}

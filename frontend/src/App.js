@@ -2,13 +2,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import './styles/globals.css';
 import Sidebar from './components/sidebar/Sidebar';
 import Header from './components/shared/Header';
+import AgentPanel from './components/agent/AgentPanel';
 import FetchPage from './components/pages/FetchPage';
 import OverviewPage from './components/pages/OverviewPage';
 import ChangeDetectionPage from './components/pages/ChangeDetectionPage';
 import IndexValidationPage from './components/pages/IndexValidationPage';
 import CompliancePage from './components/pages/CompliancePage';
 import InsightsPage from './components/pages/InsightsPage';
-import { fetchAPI } from './utils/api';
+import AgentPage from './components/pages/AgentPage';
+import { fetchAPI, getImageUrl } from './utils/api';
 
 const PAGES = {
   fetch: FetchPage,
@@ -17,13 +19,25 @@ const PAGES = {
   indices: IndexValidationPage,
   compliance: CompliancePage,
   insights: InsightsPage,
+  agent: AgentPage,
 };
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activePage, setActivePage] = useState('fetch');
   const [projectId, setProjectId] = useState(null);
+  const [aoi, setAoi] = useState(null);
   const [notifications, setNotifications] = useState([]);
+  
+  // Tactical Mission Handoff
+  const [stagedSelection, setStagedSelection] = useState(null); 
+  
+  // Tactical Agent Persistence
+  const [agentMessages, setAgentMessages] = useState([
+    { role: 'agent', content: '# ORION-1 ONLINE\nIntelligence Orchestration Network initialized. Deploying tactical protocols...' }
+  ]);
+  const [agentProgress, setAgentProgress] = useState(0);
+  const [agentSessionId] = useState(`sess_${Math.random().toString(36).substr(2, 9)}`);
   
   // Advanced Global Mission Status
   const [jobStatus, setJobStatus] = useState({
@@ -66,6 +80,20 @@ export default function App() {
         const r = await fetchAPI.getStatus(pid);
         const s = r.data;
         
+        // Deep normalization for indices
+        if (s.results?.indices) {
+          if (s.results.indices.t1) {
+            Object.values(s.results.indices.t1).forEach(idx => {
+              if (idx.url) idx.url = getImageUrl(idx.url);
+            });
+          }
+          if (s.results.indices.t2) {
+            Object.values(s.results.indices.t2).forEach(idx => {
+              if (idx.url) idx.url = getImageUrl(idx.url);
+            });
+          }
+        }
+
         setJobStatus(prev => ({
           ...prev,
           stage: s.stage || prev.stage,
@@ -74,8 +102,8 @@ export default function App() {
           change_detection: s.change_detection || prev.change_detection,
           spectral_intel: s.spectral_intel || prev.spectral_intel,
           insights: s.insights || prev.insights,
-          t1_tci_url: s.t1_tci_url || prev.t1_tci_url,
-          t2_tci_url: s.t2_tci_url || prev.t2_tci_url,
+          t1_tci_url: getImageUrl(s.t1_tci_url) || prev.t1_tci_url,
+          t2_tci_url: getImageUrl(s.t2_tci_url) || prev.t2_tci_url,
           progress: s.progress || prev.progress,
           results: { ...prev.results, ...s.results },
           logs: s.logs || prev.logs
@@ -142,13 +170,25 @@ export default function App() {
           onClearNotification={(id) => setNotifications(prev => prev.filter(n => n.id !== id))}
         />
         <main style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
-          <PageComponent
-            projectId={projectId}
-            setProjectId={setProjectId}
-            addNotification={addNotification}
-            jobStatus={jobStatus}
-            onStartFetch={startPolling}
-          />
+          <div className="main-content">
+            <PageComponent
+              projectId={projectId}
+              setProjectId={setProjectId}
+              aoi={aoi}
+              setAoi={setAoi}
+              addNotification={addNotification}
+              jobStatus={jobStatus}
+              onStartFetch={startPolling}
+              stagedSelection={stagedSelection}
+              setStagedSelection={setStagedSelection}
+              setActivePage={setActivePage}
+              agentMessages={agentMessages}
+              setAgentMessages={setAgentMessages}
+              agentProgress={agentProgress}
+              setAgentProgress={setAgentProgress}
+              agentSessionId={agentSessionId}
+            />
+          </div>
         </main>
       </div>
     </div>

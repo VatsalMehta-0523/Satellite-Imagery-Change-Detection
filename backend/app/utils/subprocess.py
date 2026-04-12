@@ -1,6 +1,7 @@
 import asyncio
 import subprocess
 import re
+from app.core.logger import logger
 
 def _sync_subprocess_run(command: str, on_progress=None, on_log=None, cwd=None) -> bool:
     """
@@ -29,7 +30,7 @@ def _sync_subprocess_run(command: str, on_progress=None, on_log=None, cwd=None) 
                 for line in stream:
                     line_clean = line.strip()
                     if not line_clean: continue
-                    print(line_clean) # Direct log to uvicorn console
+                    logger.info(f"[SUBPROCESS] {line_clean}")
                     
                     if on_log:
                         on_log(line_clean)
@@ -44,7 +45,7 @@ def _sync_subprocess_run(command: str, on_progress=None, on_log=None, cwd=None) 
             proc.wait()
             return proc.returncode == 0
     except Exception as e:
-        print(f"Subprocess critical error: {e}")
+        logger.error(f">>> [SUBPROCESS] CRITICAL ERROR: {e}")
         return False
 
 async def safe_run_subprocess(command: str, on_progress=None, on_log=None, cwd=None) -> bool:

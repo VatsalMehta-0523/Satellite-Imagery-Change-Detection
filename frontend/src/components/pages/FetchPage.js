@@ -9,8 +9,7 @@ const SOURCES = [
   { id: 'gee', label: 'GEE (S2)', sub: '10m Open Source', icon: '✦', available: true },
 ];
 
-export default function FetchPage({ projectId, setProjectId, addNotification, jobStatus, onStartFetch }) {
-  const [aoi, setAoi] = useState(null);
+export default function FetchPage({ projectId, setProjectId, aoi, setAoi, addNotification, jobStatus, onStartFetch, setStagedSelection, setActivePage }) {
   const [showModal, setShowModal] = useState(false);
   const [source, setSource] = useState('s2dr3');
   const [t1Date, setT1Date] = useState('2018-01-03');
@@ -22,6 +21,12 @@ export default function FetchPage({ projectId, setProjectId, addNotification, jo
     setAoi(geojson);
     setShowModal(true);
   }, []);
+
+  const handleTransmitToAgent = () => {
+    setStagedSelection({ aoi: aoi.geometry, t1Date, t2Date, source });
+    addNotification('Mission Control: Telemetry Transmitted to ORION', 'success');
+    setActivePage('agent');
+  };
 
   const handleFetch = async () => {
     if (!aoi) return;
@@ -112,6 +117,7 @@ export default function FetchPage({ projectId, setProjectId, addNotification, jo
           t1Date={t1Date} setT1Date={setT1Date}
           t2Date={t2Date} setT2Date={setT2Date}
           onFetch={handleFetch}
+          onTransmit={handleTransmitToAgent}
           onDiscard={() => { setShowModal(false); setAoi(null); }}
           loading={isSyncing}
         />
@@ -152,7 +158,7 @@ function ShimmerLoader({ label, pct }) {
   );
 }
 
-function FetchModal({ source, setSource, t1Date, setT1Date, t2Date, setT2Date, onFetch, onDiscard, loading }) {
+function FetchModal({ source, setSource, t1Date, setT1Date, t2Date, setT2Date, onFetch, onTransmit, onDiscard, loading }) {
   return (
     <div style={modalOverlayStyle}>
       <div className="glass-card animate-slide-up" style={modalContentStyle}>
@@ -194,10 +200,17 @@ function FetchModal({ source, setSource, t1Date, setT1Date, t2Date, setT2Date, o
           <div><label style={modalLabelStyle}>T2 ENVELOPE</label><input type="date" value={t2Date} onChange={e => setT2Date(e.target.value)} style={modalInputStyle} /></div>
         </div>
 
-        <div style={{ display: 'flex', gap: 16 }}>
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
           <button onClick={onDiscard} style={modalCancelBtn}>ABORT</button>
           <button onClick={onFetch} disabled={loading} style={modalPrimaryBtn}>{loading ? 'STARTING...' : 'INJECT MISSION'}</button>
         </div>
+
+        <button 
+          onClick={onTransmit} 
+          style={{ ...modalPrimaryBtn, background: 'var(--bg-elevated)', color: 'var(--accent)', border: '1px solid var(--accent)', width: '100%', boxShadow: 'none' }}
+        >
+          🚀 TRANSMIT TELEMETRY TO ORION
+        </button>
       </div>
     </div>
   );

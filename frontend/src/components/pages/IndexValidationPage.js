@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { indicesAPI } from '../../utils/api';
+import { indicesAPI, getImageUrl } from '../../utils/api';
 
 const INDEX_COLORS = {
   NDVI: '#10b981', NDBI: '#f43f5e', NDWI: '#0ea5e9', MNDWI: '#38bdf8', BSI: '#f59e0b', EVI: '#059669'
@@ -32,7 +32,22 @@ export default function IndexValidationPage({ projectId, addNotification, jobSta
         setLoading(true);
         indicesAPI.get(projectId)
           .then(r => {
-             if (r.data && Object.keys(r.data).length > 0) setData(r.data);
+             if (r.data && Object.keys(r.data).length > 0) {
+                const norm = r.data;
+                // Normalize t1/t2 historical urls
+                ['t1', 't2'].forEach(time => {
+                  if (norm[time]?.indices) {
+                    Object.values(norm[time].indices).forEach(ix => { 
+                      if (ix.url) ix.url = getImageUrl(ix.url);
+                      else if (ix.image_path) {
+                        const relPart = ix.image_path.includes('data\\') ? ix.image_path.split('data\\')[1] : ix.image_path.split('data/')[1];
+                        ix.url = getImageUrl(`/data/${relPart.replace(/\\/g, '/')}`);
+                      }
+                    });
+                  }
+                });
+                setData(norm);
+             }
           })
           .catch(e => {})
           .finally(() => setLoading(false));
