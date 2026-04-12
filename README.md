@@ -2,100 +2,106 @@
 
 **UrbanEye** is a professional-grade geospatial SaaS platform designed for high-precision urban monitoring, automated compliance enforcement, and longitudinal change analysis. 
 
-The platform bridges the gap between raw satellite data and actionable urban insights by integrating **Deep Siamese Transformers** (ChangeFormer V6) with a **Multi-Spectral Validation Engine**. It is built for urban planners, environmental auditors, and compliance officers who require verifiable evidence of urban shifts over time.
+The platform bridges the gap between raw satellite data and actionable urban insights by integrating **ORION-1**, an autonomous LangGraph-powered orchestrator, with **Deep Siamese Transformers** (ChangeFormer V6) and a **Multi-Spectral Validation Engine**.
 
 ---
 
-## 🏗️ 1. High-Level Architecture
+## 🏗️ 1. Neural Orchestration Architecture
 
-UrbanEye utilizing a highly decoupled, asynchronous architecture to manage computationally expensive geospatial operations:
+UrbanEye utilizes a sophisticated, event-driven architecture centered around the **ORION-1 AI Agent**:
 
 ```mermaid
 graph TD
-    A[React Interface] -->|POLL| B(FastAPI Orchestrator)
-    B -->|EXECUTE| C[S2DR3/GEE Pipeline]
-    C -->|SYNC| D[(PostgreSQL Data Store)]
-    B -->|SUBPROCESS| E[ChangeFormer V6 Neural Engine]
-    E -->|LOGS| B
-    B -->|CONTEXT| F[Google Gemini 1.5 Pro/Flash]
-    F -->|NARRATIVE| B
-    B -->|TELEMETRY| A
+    A[React Interface] -->|Telemetry Injection| B(App State)
+    B -->|WebSocket| C[ORION-1 Agent Orchestrator]
+    C -->|LangGraph| D{Decision Engine}
+    D -->|Tool: create_mission| E[(PostgreSQL)]
+    D -->|Tool: orbital_fetch| F[S2DR3/GEE/Planet]
+    D -->|Tool: spectral_analysis| G[Spectral Engine]
+    D -->|Tool: neural_inference| H[ChangeFormer V6]
+    F -->|Neural Sync| A
+    G -->|Neural Sync| A
+    C -->|Markdown Dossier| A
+    D -->|Tool: generate_report| I[PDF Dossier Engine]
 ```
 
-- **Frontend (React 18)**: Manages mission state and handles complex Leaflet-based AOI drawing.
-- **Backend (FastAPI)**: Serves as the mission orchestrator, routing data between imagery sources, the neural engine, and the database.
-- **Database (PostgreSQL)**: Stores mission metadata, spectral index statistics, and compliance rules.
-- **Data Dir (Local)**: A structured directory (`/data/{project_id}`) that stores high-resolution TIFs, PNG previews, and AI masks.
+- **ORION-1 Autonomous Brain**: Powered by LangGraph and Groq (Llama-3/Gemma), managing the full 8-phase GEOINT lifecycle.
+- **Neural Dashboard Sync**: Real-time WebSocket bridge that updates the Dashboard imagery and loading bars as the agent works autonomously.
+- **Human-in-the-Loop Bridge**: Allows commanders to manually select AOIs and dates on the map and "Transmit" those parameters directly to the agent's reasoning cycle.
 
 ---
 
-## 🧠 2. Deep Dive: ChangeFormer V6 Detection Model
+## 🧠 2. ORION-1: Autonomous Mission Control
 
-The core of UrbanEye’s intelligence is the **ChangeFormer V6** model, a state-of-the-art transformer-based Siamese network designed specifically for change detection in high-resolution remote sensing imagery.
+The core intelligence layer, **ORION-1**, executes complex multi-step geospatial missions with minimal human intervention.
 
-### 🔬 How it Works (The Science)
-Unlike traditional "Difference Imaging" which just subtracts pixels, ChangeFormer understands **structural context**:
-
-1.  **Siamese Architecture**: The model takes two inputs (T1 and T2). It passes them through a **Shared Encoder** (Siamese branch). This ensures the model treats both time points with identical feature extraction logic.
-2.  **Transformer Encoders**: Traditional CNNs look at local pixel clusters (3x3, 5x5). ChangeFormer uses **Multi-Head Self-Attention**, allowing it to see **global dependencies**. For example, it can recognize that a new building in T2 is part of a larger construction project hundreds of meters away.
-3.  **Difference Module**: The model identifies feature discrepancies between T1 and T2 at multiple scales (Low-level textures vs High-level objects).
-4.  **Prediction Head**: Outputs a binary classification for every pixel (0: No Change, 1: Change).
-
-### ⚙️ Inference Pipeline Details
-To run this model on consumer GPUs with high-resolution imagery, UrbanEye implements a custom **Tiled Inference Engine**:
-
-- **Input Normalization**: All imagery is converted to Float32 and normalized using **ImageNet Statistics** (`mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]`). This aligns the input with the model's pre-trained weights for maximum accuracy.
-- **Patch Extraction (256x256)**: The image is divided into tiles. To prevent "boundary noise" where the model cuts off an object, we use a **224px stride**, creating a 32-pixel overlap.
-- **Argmax Decoding**: The model outputs logits for the "Change" and "No Change" classes. We use `torch.argmax` to select the most probable class for every pixel, creating a high-contrast binary mask.
-- **Telemetry Stream**: Inference logs are captured via standard output and streamed to the UI, showing exactly how many "change pixels" are found in each tile in real-time.
+### 🔬 Operational Protocols
+1.  **Telemetry Ingestion**: Ingests hand-drawn AOIs and temporal windows from the map dashboard.
+2.  **Mission Configuration**: Automatically registers missions, searches for optimal orbital scenes, and maintains a persistent memory of the chat and mission state.
+3.  **Tactical Visualization**: Communicates using a structured Markdown protocol, providing real-time tool logs and detailed data tables directly in the Mission Control chat.
+4.  **Autonomous Orchestration**: Triggers imagery fetches, index computations, and neural inference through a series of specialized orbital tools.
 
 ---
 
-## 📊 3. Deep Dive: Spectral Validation Engine
+## 🏗️ 3. ChangeFormer V6 & Spectral Intelligence
 
-Before running AI, UrbanEye validates environmental health using the **Spectral Validation Engine**. It analyzes 10+ bands from Sentinel-2/GEE satellites to compute scientific indices:
+The platform's analytical power is driven by state-of-the-art transformer models and scientific multi-spectral analysis.
 
-| Index | Spectral Formula | Urban Significance |
-|---|---|---|
-| **NDVI** | `(NIR - Red) / (NIR + Red)` | Tracks vegetation health. Values < 0 indicate build-up or loss. |
-| **NDBI** | `(SWIR1 - NIR) / (SWIR1 + NIR)`| Detects asphalt and concrete. Essential for identifying urbanization. |
-| **NDWI** | `(Green - NIR) / (Green + NIR)`| Identifies open water. Tracks wetland encroachment. |
-| **MNCWI**| `(Green - SWIR2) / (Green + SWIR2)`| Optimized for urban areas. Differentiates ponds from asphalt shadows. |
-| **BSI**  | `((SWIR1 + Red) - (NIR + Blue)) / ((SWIR1 + Red) + (NIR + Blue))` | Highlights bare soil. Predicts upcoming construction phases. |
-| **EVI**  | `2.5 * ((NIR - Red) / (NIR + 6*Red - 7.5*Blue + 1))` | High-precision green-space analysis for dense canopy verification. |
-
-**Processing logic**: We use `rasterio` and `numpy` to perform these operations directly on the 10m/20m multi-spectral arrays, generating 8-bit color-mapped PNGs for the dashboard.
+### 🛰️ Detection Capabilities
+- **Siamese Transformers**: ChangeFormer V6 utilizes multi-head self-attention to understand global structural context, differentiating true urban change from seasonal shifts.
+- **Spectral Validation Engine**: Computes 10+ scientific indices in real-time:
+    - **NDVI & EVI**: High-precision vegetation and agricultural health monitoring.
+    - **NDBI & BSI**: Detection of new urban build-ups and bare soil for construction prediction.
+    - **NDWI & MNDWI**: Tracking of water bodies and wetland encroachment.
 
 ---
 
-## ⚙️ 4. Mission Setup & Requirements
+## 📊 4. Intelligence Deliverables
 
-### Technical Prerequisites
-- **Python 3.10.11**: Specifically tested for library compatibility.
-- **Node.js 18+**: For the React polling architecture.
-- **PostgreSQL 14+**: Stores mission metadata and telemetry logs.
-- **NVIDIA GPU (8GB+ VRAM)**: Required for the Transformer-based inference at reasonable speeds.
-
-### Essential API Keys & Credentials
-UrbanEye requires three key "fuel sources" to operate:
-1.  **Google Gemini API Key**: Used for the **Narrative Synthesis**. It takes the spectral stats and CD magnitude to write a human-readable report.
-2.  **GEE Service Account JSON**: Required for the **Earth Engine Pipeline**. Place this in the root or set the path in `.env`.
-3.  **Planet Labs API Key**: (Optional/Integration Ready) Used for high-frequency daily revisits.
-
-### Launching the Ground Station
-1.  **Initialize DB**: Execute `scripts/init_db.sql`.
-2.  **Environment Setup**: Populate `backend/.env` with your Keys.
-3.  **Ignition**: Run `start_all.bat`. This handles venv creation, dependency sync, and starts both servers.
+UrbanEye focuses on professional grade, verifiable evidence:
+- **Real-time Neural Terminal**: Live logs from the Transformer inference engine.
+- **Automated PDF Dossiers**: Professional intelligence reports generated via `reportlab`, containing mission statistics, spectral graphs, and high-resolution binary masks.
+- **Side-by-Side Validation**: Interactive visual comparison layers for baseline (T1) and monitoring (T2) epochs.
 
 ---
 
-## 🕵️ 5. The Professional Workflow
+## 🏗️ 5. Code Repository Structure
 
-1.  **AOI Strategic Selection**: Use the Leaflet-Draw tools to select your survey boundary.
-2.  **Baseline Retrieval**: The platform fetches T1 and T2 imagery in parallel. Observe the **Spectral Decoding** animation as the platform computes indices.
-3.  **Intelligence Initiation**: Once you verify the TCI quality, click **"INITIATE CHANGE DETECTION"**. The ChangeFormer model will initialize on your GPU.
-4.  **Log Monitoring**: Watch the **Neural Terminal**. If it reports `0 changed pixels`, the imagery is likely too saturated or no change occurred.
-5.  **Final Synthesis**: Once the mask is ready, Google Gemini analyzes the pixel density and spectral shifts to provide a final **Mission Insight Report**.
+UrbanEye is a modular, industrial-grade intelligence platform:
+
+### 🛰️ Backend (UrbanEye Ground Station)
+- `backend/ai_agent/`: **The ORION brain.** Contains the LangGraph definition (`agent.py`), tactical tools (`tools.py`), and neural state persistence.
+- `backend/app/api/`: REST & WebSocket endpoints for mission orchestration and real-time telemetry.
+- `backend/app/core/`: Database connection pools and central configuration.
+- `backend/app/pipelines/`: **Proprietary Intelligence Engines.**
+    - `changeformer.py`: Siamese Transformer inference logic.
+    - `s2dr3.py` / `planet.py`: Satellite-specific acquisition pipelines.
+- `backend/app/services/`: Auxiliary logic including the PDF Dossier Generator.
+- `backend/data/`: Structured storage for high-resolution imagery and AI-generated masks.
+
+### 🍱 Frontend (Neural Dashboards)
+- `frontend/src/App.js`: **Central Nervous System.** Manages global persistence, chat history, and mission polling.
+- `frontend/src/components/pages/`:
+    - `AgentPage.js`: AI Mission Control interface with Markdown rendering.
+    - `FetchPage.js`: Leaflet-based AOI selector and imagery retrieval dashboard.
+    - `OverviewPage.js`: Longitudinal side-by-side comparison interface.
+- `frontend/src/components/sidebar/`: Tactical navigation and mission job-status monitors.
+- `frontend/src/utils/api.js`: Standardized Axios wrappers for the geospatial API.
 
 ---
-© 2026 UrbanEye Geospatial Intelligence. Professional Grade Remote Sensing & Compliance.
+
+## ⚙️ 6. Technical Requirements & Setup
+
+### Prerequisites
+- **Python 3.10.11** (Tested for Siamese compatibility)
+- **Node.js 18+** (React 18 Architecture)
+- **PostgreSQL 14+** (Persistent Checkpointing)
+- **NVIDIA GPU (8GB+ VRAM)** (Required for ChangeFormer V6)
+
+### Installation & Ignition
+1.  **Initialize DB**: Execute `backend/check_db_v3.py` to ensure schema integrity.
+2.  **Environment Setup**: Configure `backend/.env` with your GROQ, GEE, and Planet API keys.
+3.  **Ignition**: Run `start_all.bat`. This handles venv creation, dependency sync, and starts the asynchronous mission orchestrators.
+
+---
+© 2026 UrbanEye Geospatial Intelligence. Autonomous Orbital Reconnaissance & Compliance.
