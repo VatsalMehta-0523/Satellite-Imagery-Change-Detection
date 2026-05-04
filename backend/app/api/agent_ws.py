@@ -30,6 +30,27 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+def _safe_serialize(obj):
+    """Force any LangChain message object or complex type into a JSON-safe string."""
+    if obj is None:
+        return ""
+    if isinstance(obj, str):
+        return obj
+    if isinstance(obj, dict):
+        try:
+            return json.dumps(obj, indent=2, default=str)
+        except Exception:
+            return str(obj)
+    # Handle LangChain ToolMessage, AIMessage, etc.
+    if hasattr(obj, 'content'):
+        return str(obj.content)
+    if hasattr(obj, 'return_values'):
+        return json.dumps(obj.return_values, indent=2, default=str)
+    try:
+        return json.dumps(obj, indent=2, default=str)
+    except Exception:
+        return str(obj)
+
 @router.websocket("/ws/agent/{session_id}")
 async def agent_websocket_endpoint(websocket: WebSocket, session_id: str):
     await manager.connect(session_id, websocket)
@@ -73,31 +94,46 @@ async def run_agent_cycle(session_id: str, content: str, aoi: Optional[dict], mi
             e_type = event["type"]
             
             if e_type == "TOOL_START":
+                tool_name = event.get("tool", "unknown")
                 await manager.send_json(session_id, {
                     "type": "TOOL_EXECUTION",
-                    "tool": event["tool"],
+                    "tool": tool_name,
                     "status": "initiating",
-                    "result": f"Executing orbital tool: {event['tool']}..."
+                    "result": f"⚙ Executing: {tool_name}..."
                 })
             
             elif e_type == "TOOL_END":
-                tool_name = event.get("tool")
-                tool_output = event.get("output")
+                tool_name = event.get("tool", "unknown")
+                raw_output = event.get("output")
                 
-                # Neural Sync: If a mission was created, notify the UI to start global polling
-                if tool_name == "create_mission" and isinstance(tool_output, dict):
-                    p_id = tool_output.get("project_id")
-                    if p_id:
+                # Safely serialize and notify frontend
+                safe_output = _safe_serialize(raw_output)
+                
+                # Broaden sync-trigger list and harden extraction
+                sync_tools = ["create_mission", "execute_orbital_fetch", "execute_spectral_analysis", "run_changeformer_inference"]
+                if tool_name in sync_tools:
+                    try:
+                        p_id = None
+                        # Check output for project_id
+                        output_data = json.loads(safe_output) if isinstance(safe_output, str) else raw_output
+                        if isinstance(output_data, dict):
+                            p_id = output_data.get("project_id") or output_data.get("id")
+                        
+                        logger.info(f">>> [AGENT] Syncing UI for {tool_name} (PID: {p_id})")
                         await manager.send_json(session_id, {
                             "type": "MISSION_SYNC_TRIGGER",
-                            "project_id": p_id
+                            "project_id": p_id,
+                            "tool": tool_name,
+                            "status": "accomplished"
                         })
+                    except Exception as ex:
+                        logger.warning(f">>> [AGENT] Sync skipped for {tool_name}: {ex}")
 
                 await manager.send_json(session_id, {
                     "type": "TOOL_EXECUTION",
                     "tool": tool_name,
                     "status": "accomplished",
-                    "result": f"Task completed successfully."
+                    "result": safe_output
                 })
             
             elif e_type == "AGENT_MESSAGE":
@@ -112,5 +148,5 @@ async def run_agent_cycle(session_id: str, content: str, aoi: Optional[dict], mi
         logger.error(f">>> [AGENT] CYCLE ERROR: {str(e)}")
         await manager.send_json(session_id, {
             "type": "ERROR",
-            "content": "ORION is currently re-aligning its neural weights due to a connection discrepancy. Please re-initiate your mission in a moment."
+            "content": f"ORION encountered an issue: {str(e)}. Please re-initiate your command."
         })

@@ -10,6 +10,7 @@ import rasterio
 import matplotlib.pyplot as plt
 from PIL import Image
 from typing import Optional, Dict, Any
+from urllib.parse import unquote
 
 from app.core.config import S2DR3_BASE_URL, S2DR3_USER_ID, DATA_DIR
 from app.utils.subprocess import safe_run_subprocess
@@ -115,7 +116,10 @@ async def submit_and_poll(client: httpx.AsyncClient, date: str, aoi: str, label:
                 text = r.text.lower()
                 if "completed" in text:
                     logger.info(f">>> [I/O] {label} Remote Work Done.")
-                    return {"tci": data.get("save_path_TCI"), "ms": data.get("save_path_MS"), "label": label, "date": date}
+                    poll_data = r.json()
+                    tci_path = unquote(poll_data.get("save_path_TCI") or data.get("save_path_TCI"))
+                    ms_path = unquote(poll_data.get("save_path_MS") or data.get("save_path_MS"))
+                    return {"tci": tci_path, "ms": ms_path, "label": label, "date": date}
                 elif "failed" in text or "error" in text:
                     logger.error(f">>> [I/O] {label} Remote Error: {r.text}")
                     return None
@@ -180,6 +184,9 @@ async def execute_ms_phase(
     on_progress=None
 ) -> Optional[dict]:
     """Phase 2: Fetch MS and process Spectral Intel."""
+    if not result:
+        logger.warning(f"Skipping MS phase: No result/TCI failed for {label}")
+        return None
     label = result["label"]
     project_dir = os.path.join(DATA_DIR, str(project_id))
     label_dir = os.path.join(project_dir, label.lower())

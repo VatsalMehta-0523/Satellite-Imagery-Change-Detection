@@ -72,14 +72,32 @@ export default function AgentPage({
         if (data.type === 'AGENT_MESSAGE') {
             setMessages(prev => [...prev, { role: 'agent', content: data.content }]);
         } else if (data.type === 'TOOL_EXECUTION') {
-            setMessages(prev => [...prev, { role: 'agent', content: `[ACTION] ${data.tool.toUpperCase()}: ${data.result}` }]);
+            let displayContent = data.result;
+            try {
+                // Check if result is a JSON string (our tools now return rich JSON)
+                const parsed = JSON.parse(data.result);
+                if (parsed && (parsed.message || parsed.ui_location)) {
+                    displayContent = `✅ **${data.tool.toUpperCase()} COMPLETE**\n\n${parsed.message || ''}`;
+                    if (parsed.ui_location) {
+                        displayContent += `\n\n📍 **LOCATION:** ${parsed.ui_location}`;
+                    }
+                }
+            } catch (e) {
+                // Fallback to raw result
+                displayContent = `[ACTION] ${data.tool.toUpperCase()}: ${data.result}`;
+            }
+
+            setMessages(prev => [...prev, { role: 'agent', content: displayContent }]);
             setProgress(prev => Math.min(prev + 15, 95));
         } else if (data.type === 'MISSION_SYNC_TRIGGER') {
             // Neural Sync: Dashboard is now controlled by the AI agent
-            if (data.project_id) {
-                setProjectId(data.project_id);
-                if (onStartFetch) onStartFetch(data.project_id);
-                addNotification(`ORION: Dashboard Synchronized with Mission ${data.project_id}`, 'success');
+            const pid = data.project_id || projectId;
+            if (pid) {
+                setProjectId(pid);
+                if (onStartFetch) onStartFetch(pid);
+                
+                const toolVerb = data.tool === 'create_mission' ? 'Created' : 'Updated';
+                addNotification(`ORION: Dashboard Synchronized (${toolVerb} PID ${pid})`, 'success');
             }
         } else if (data.type === 'PROGRESS_UPDATE') {
             setProgress(data.progress || 0);
@@ -91,7 +109,7 @@ export default function AgentPage({
         } else if (data.type === 'CYCLE_COMPLETE') {
             setProgress(100);
         } else if (data.type === 'ERROR') {
-            setMessages(prev => [...prev, { role: 'agent', content: `CRITICAL ERROR: ${data.content}` }]);
+            setMessages(prev => [...prev, { role: 'agent', content: `❌ **CRITICAL FAILURE**\n\n${data.content}` }]);
             addNotification(data.content, 'error');
         }
     };
@@ -179,7 +197,8 @@ export default function AgentPage({
                                     borderRadius: 16, 
                                     fontSize: 14,
                                     lineHeight: 1.6,
-                                    maxWidth: '80%',
+                                    maxWidth: '90%',
+                                    width: m.content.startsWith('[ACTION]') ? '100%' : 'auto',
                                     background: m.role === 'agent' ? 'var(--bg-elevated)' : 'var(--accent)',
                                     color: m.role === 'agent' ? 'var(--text-primary)' : 'var(--bg-deep)',
                                     border: m.role === 'agent' ? '1px solid var(--border)' : 'none',
@@ -187,18 +206,24 @@ export default function AgentPage({
                                     overflow: 'hidden'
                                 }}>
                                     {m.role === 'agent' ? (
-                                        <ReactMarkdown 
-                                            remarkPlugins={[remarkGfm]}
-                                            components={{
-                                                table: ({node, ...props}) => <table style={tableStyle} {...props} />,
-                                                th: ({node, ...props}) => <th style={thStyle} {...props} />,
-                                                td: ({node, ...props}) => <td style={tdStyle} {...props} />,
-                                                h2: ({node, ...props}) => <h2 style={h2Style} {...props} />,
-                                                ul: ({node, ...props}) => <ul style={ulStyle} {...props} />
-                                            }}
-                                        >
-                                            {m.content}
-                                        </ReactMarkdown>
+                                        m.content.startsWith('[ACTION]') ? (
+                                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', whiteSpace: 'pre-wrap' }}>
+                                                {m.content}
+                                            </div>
+                                        ) : (
+                                            <ReactMarkdown 
+                                                remarkPlugins={[remarkGfm]}
+                                                components={{
+                                                    table: ({node, ...props}) => <table style={tableStyle} {...props} />,
+                                                    th: ({node, ...props}) => <th style={thStyle} {...props} />,
+                                                    td: ({node, ...props}) => <td style={tdStyle} {...props} />,
+                                                    h2: ({node, ...props}) => <h2 style={h2Style} {...props} />,
+                                                    ul: ({node, ...props}) => <ul style={ulStyle} {...props} />
+                                                }}
+                                            >
+                                                {m.content}
+                                            </ReactMarkdown>
+                                        )
                                     ) : m.content}
                                 </div>
                             </div>

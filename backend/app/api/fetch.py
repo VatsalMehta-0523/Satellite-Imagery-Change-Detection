@@ -7,7 +7,7 @@ import json
 import os
 import logging
 from datetime import datetime
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
@@ -334,10 +334,6 @@ async def _run_manual_cd_workflow(project_id, t1_db, t2_db, t1_path, t2_path, lo
         log_fn(f"[ERROR] Mission Failure: {e}")
         if project_id in _fetch_status:
             _fetch_status[project_id]["change_detection"] = "error"
-
-    except Exception as e:
-        logger.critical(f"[MISSION {project_id}] CRITICAL PIPELINE FAILURE: {e}")
-        if project_id in _fetch_status:
             _fetch_status[project_id]["stage"] = "failed"
 
 @router.get("/status/{project_id}")
@@ -369,3 +365,41 @@ async def get_project(project_id: int):
                 img_dict["tci_url"] = f"/data/{rel.replace(os.sep, '/')}"
             result["images"].append(img_dict)
     return result
+
+@router.get("/valid-dates")
+async def get_valid_dates(
+    bbox: str = Query(..., description="minx,miny,maxx,maxy"),
+    year: int = Query(..., description="Year to query, e.g. 2023")
+):
+    """Fetch all dates with Sentinel-2 SR imagery for the given AOI and year via GEE."""
+    try:
+        import ee
+        coords = [float(c.strip()) for c in bbox.split(",")]
+        if len(coords) != 4:
+            return JSONResponse(status_code=400, content={"error": "bbox must be minx,miny,maxx,maxy"})
+        
+        minx, miny, maxx, maxy = coords
+        aoi = ee.Geometry.Rectangle([minx, miny, maxx, maxy])
+
+        start = f"{year}-01-01"
+        end = f"{year}-12-31"
+
+        collection = (
+            ee.ImageCollection("COPERNICUS/S2_SR")
+            .filterBounds(aoi)
+            .filterDate(start, end)
+        )
+
+        dates = (
+            collection.aggregate_array('system:time_start')
+            .map(lambda d: ee.Date(d).format('YYYY-MM-dd'))
+            .distinct()
+            .sort()
+        )
+
+        date_list = dates.getInfo()
+        logger.info(f">>> [GEE] Found {len(date_list)} valid dates for year {year}")
+        return {"dates": date_list, "year": year, "count": len(date_list)}
+    except Exception as e:
+        logger.error(f">>> [GEE] Valid dates query failed: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})

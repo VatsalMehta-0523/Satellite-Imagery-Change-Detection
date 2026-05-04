@@ -35,3 +35,10 @@ backend/*.json
 Thumbs.db
 *.log
 npm-debug.log*
+
+# LangGraph
+backend/.langgraph_api/
+.langgraph_api/
+
+# Archives
+*.zip

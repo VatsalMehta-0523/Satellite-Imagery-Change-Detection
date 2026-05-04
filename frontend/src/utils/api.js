@@ -21,6 +21,7 @@ export const fetchAPI = {
   listProjects: () => api.get('/fetch/projects'),
   getCDResult: (projectId) => api.get(`/change-detection/result/${projectId}`),
   detectChanges: (projectId) => api.post(`/fetch/detect-changes/${projectId}`),
+  getValidDates: (bbox, year) => api.get(`/fetch/valid-dates?bbox=${bbox}&year=${year}`),
 };
 
 export const changeDetectionAPI = {
